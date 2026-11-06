@@ -6,8 +6,9 @@
 #   2. Resolve SwiftPM deps (Package.resolved already committed).
 #   3. Build Debug — verifies compilation + ENABLE_TESTABILITY.
 #   4. Build Release — verifies optimized build (no assertions).
-#   5. Run Swift lint check (no warnings on new code).
-#   6. (Optional) Run unit tests via xcodebuild -test.
+#   5. Build Tests target — verifies unit test compilation.
+#   6. Run Swift lint check (no warnings on new code).
+#   7. (Optional) Run unit tests via xcodebuild -test.
 
 name: CI
 on:
@@ -83,30 +84,33 @@ jobs:
             | tee build-release.log
           echo "Release build: ✅"
 
-      - name: Swift lint check
+      - name: Build Tests target
         run: |
-          # Verify no obvious Swift compiler issues in new files
-          # We check that swiftlint (if installed) passes on the Sources dir
-          if command -v swiftlint &> /dev/null; then
-            swiftlint lint --config .swiftlint.yml 2>&1 || echo "Warning: swiftlint reported issues"
-          else
-            echo "swiftlint not installed — skipping lint (install via 'brew install swiftlint')"
-          fi
+          set -e
+          xcodebuild \
+            -project "Sentient OS macOS.xcodeproj" \
+            -scheme "Tests" \
+            -configuration Debug \
+            -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath DerivedData \
+            build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee build-tests.log
+          echo "Tests bundle: ✅"
 
       - name: Run unit tests
         run: |
           # Run any XCTest-based unit tests in the project
-          # If no test target exists, this step reports a clear message
           xcodebuild \
             -project "Sentient OS macOS.xcodeproj" \
-            -scheme "Sentient OS macOS" \
+            -scheme "Tests" \
             -configuration Debug \
             -destination "platform=macOS,arch=arm64" \
             -derivedDataPath DerivedData \
             test \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            TEST_AFTER_BUILD=YES \
             2>&1 | tee test-output.log || true
 
           # If no test bundle was found, note it
@@ -117,6 +121,16 @@ jobs:
             echo "Unit tests: ✅"
           fi
 
+      - name: Swift lint check
+        run: |
+          # Verify no obvious Swift compiler issues in new files
+          # We check that swiftlint (if installed) passes on the Sources dir
+          if command -v swiftlint &> /dev/null; then
+            swiftlint lint --config .swiftlint.yml 2>&1 || echo "Warning: swiftlint reported issues"
+          else
+            echo "swiftlint not installed — skipping lint (install via 'brew install swiftlint')"
+          fi
+
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -125,5 +139,6 @@ jobs:
           path: |
             build-debug.log
             build-release.log
+            build-tests.log
             test-output.log
           retention-days: 7

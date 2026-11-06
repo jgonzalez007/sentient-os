@@ -6,6 +6,13 @@
 //  This file exists so XCTestCase subclasses work in a synchronized-file-group project.
 //
 
+//
+//  XCTestCase.swift
+//  Sentient OS macOS Tests
+//
+//  Base test case for Sentient OS — provides shared utilities for all unit tests.
+//
+
 import XCTest
 
 /// Base test case that all Sentient OS tests inherit from.
@@ -34,7 +41,6 @@ open class SentientTestCase: XCTestCase {
 
     /// Assert that the given string does NOT contain high-risk PII.
     func assertNoPII(_ text: String, file: String = #file, line: UInt = #line) {
-        // PIICheck.exists checks the regex patterns used by PIIScan
         XCTAssertFalse(
             (try? NSRegularExpression(pattern: #"\b(?!000|666|9\d\d)\d{3}[ -](?!00)\d{2}[ -](?!0000)\d{4}\b"#, options: []))
                 ?.firstMatch(in: text, options: [], range: NSRange(location: 0, length: text.utf8.count)) != nil,

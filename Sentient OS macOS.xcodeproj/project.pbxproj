@@ -71,6 +71,7 @@
 			isa = PBXGroup;
 			children = (
 				5A3F39112FD0F43300DD835E /* Sentient OS.app */,
+				5B0000012FD0F43300DD835E /* Tests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -108,6 +109,29 @@
 			productReference = 5A3F39112FD0F43300DD835E /* Sentient OS.app */;
 			productType = "com.apple.product-type.application";
 		};
+		5B0000002FD0F43300DD835E /* Tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5B00000A2FD0F43300DD835E /* Build configuration list for PBXNativeTarget "Tests" */;
+			buildPhases = (
+				5B0000012FD0F43300DD835E /* Sources */,
+				5B0000022FD0F43300DD835E /* Frameworks */,
+				5B0000032FD0F43300DD835E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5B0000042FD0F43300DD835E /* Tests */,
+			);
+			name = Tests;
+			packageProductDependencies = (
+				5B0000052FD0F43300DD835E /* XCTest */,
+			);
+			productName = Tests;
+			productReference = 5B0000012FD0F43300DD835E /* Tests.xctest */,
+			productType = "com.apple.product-type.bundle";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -144,6 +168,7 @@
 			projectRoot = "";
 			targets = (
 				5A3F39102FD0F43300DD835E /* Sentient OS macOS */,
+				5B0000002FD0F43300DD835E /* Tests */,
 			);
 		};
 /* End PBXProject section */
@@ -371,7 +396,7 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Sentient reads the calendars you choose on this Mac to understand your schedule. Events are filtered privately on your device. This connection does not change your events.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sentient OS uses the microphone when you choose to speak a task to Sidekick.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sentient OS uses Apple’s on-device speech recognition where supported to turn your spoken request into a Sidekick task.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sentient OS uses Apple's on-device speech recognition where supported to turn your spoken request into a Sidekick task.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -410,7 +435,7 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Sentient reads the calendars you choose on this Mac to understand your schedule. Events are filtered privately on your device. This connection does not change your events.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sentient OS uses the microphone when you choose to speak a task to Sidekick.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sentient OS uses Apple’s on-device speech recognition where supported to turn your spoken request into a Sidekick task.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sentient OS uses Apple's on-device speech recognition where supported to turn your spoken request into a Sidekick task.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -426,6 +451,55 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		5B0000062FD0F43300DD835E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SDKROOT)/usr/lib/swift",
+				);
+				GCC_OPTIMIZATION_LEVEL = 0;
+				INFOPLIST_FILE = "Tests/Info.plist";
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "jesai.Sentient-OS-macOS.Tests";
+				PRODUCT_NAME = "Tests(xctest)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TEST_FIRST = YES;
+			};
+			name = Debug;
+		};
+		5B0000072FD0F43300DD835E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_TESTABILITY = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SDKROOT)/usr/lib/swift",
+				);
+				INFOPLIST_FILE = "Tests/Info.plist";
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "jesai.Sentient-OS-macOS.Tests";
+				PRODUCT_NAME = "Tests(xctest)";
+				SWIFT_VERSION = 5.0;
+				TEST_FIRST = YES;
 			};
 			name = Release;
 		};
@@ -446,6 +520,15 @@
 			buildConfigurations = (
 				5A3F391D2FD0F43400DD835E /* Debug */,
 				5A3F391E2FD0F43400DD835E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5B00000A2FD0F43300DD835E /* Build configuration list for PBXNativeTarget "Tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5B0000062FD0F43300DD835E /* Debug */,
+				5B0000072FD0F43300DD835E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -484,6 +567,14 @@
 				minimumVersion = 8.0.0;
 			};
 		};
+		5B0000082FD0F43300DD835E /* XCRemoteSwiftPackageReference "XCTest" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-xctest.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -505,6 +596,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5AE5710001000000000000A3 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
 			productName = Sentry;
+		};
+		5B0000052FD0F43300DD835E /* XCTest */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5B0000082FD0F43300DD835E /* XCRemoteSwiftPackageReference "XCTest" */;
+			productName = XCTest;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
