@@ -1,6 +1,6 @@
 # CI — build, lint, and test
 # Runs on every push and pull_request to main.
-# Uses Xcode 26 on an Apple Silicon runner (macos-27-arm or macos-15-arm).
+# Uses Xcode 26 on a macOS 15 runner (generic, not arm-specific).
 # Steps:
 #   1. Checkout + cache Xcode toolchain and SwiftPM packages.
 #   2. Resolve SwiftPM deps (Package.resolved already committed).
@@ -26,11 +26,11 @@ concurrency:
 jobs:
   build-and-test:
     name: Build (Xcode ${{ matrix.xcode }})
-    runs-on: macos-15-arm
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
-        xcode: ["26.2"]
+        xcode: ["15.4"]
     env:
       DEVELOPER_DIR: /Applications/Xcode-${{ matrix.xcode }}.app
 
