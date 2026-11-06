@@ -16,6 +16,10 @@
 //   - CycleNote      EPHEMERAL. One survivor summary, wiped at cycle end (the proactive button).
 //                    Junk/sensitive store nothing. `kind` + `sourceID` carry the cloud's trust tag.
 //
+//  Phase 1.3: Real-time progress tracking. Added `ConnectorProgress` model (per-connector
+//  live state: started, running, completed, failed) and `perConnectorProgress` actor properties
+//  for the UI to consume. The `RunProgress` feed now includes per-connector breakdown.
+//
 //  Only this actor touches the @Models; callers pass Sendable value types (ItemKey, CycleNoteItem).
 //  Every per-item commit reports a `CommitOutcome`: a FULL DISK comes back as `.diskFull` so the run
 //  stops at the first one (every later item would fail the same way and be lost); any other store
@@ -25,7 +29,42 @@
 import Foundation
 import SwiftData
 
+// MARK: - ConnectorProgress (Phase 1.3)
+
+/// Per-connector live progress state. The UI subscribes to this to show real-time
+/// connector status (not just high-water marks). Each connector gets one entry
+/// per ingestion cycle.
+struct ConnectorProgress: Codable, Sendable, Identifiable {
+    let id: String              // connector's SourceKind.rawValue
+    let kind: SourceKind
+    var state: State
+    var itemsProcessed: Int
+    var itemsTotal: Int?        // nil = unknown
+    var lastItemDate: Date?
+    var error: String?
+    var startedAt: Date?
+    var completedAt: Date?
+    var failedAt: Date?
+
+    enum State: String, Codable, Sendable {
+        case idle        // not yet started
+        case running     // actively processing
+        case completed   // finished successfully
+        case failed      // encountered an error
+    }
+
+    init(kind: SourceKind) {
+        self.id = kind.rawValue
+        self.kind = kind
+        self.state = .idle
+        self.itemsProcessed = 0
+        self.itemsTotal = nil
+    }
+}
+
 // MARK: - Models
+
+/// DURABLE — one per bucket.
 
 /// DURABLE — one per bucket.
 ///
@@ -250,6 +289,51 @@ actor CycleStore {
     private var failNextHostedCommit = false
     func failNextMCPCommitForTesting() { failNextHostedCommit = true }
     #endif
+
+    // MARK: - Per-Connector Progress Tracking (Phase 1.3)
+
+    /// Live progress snapshots for every connector in the current cycle.
+    /// The UI reads this to show per-connector status, not just overall counts.
+    private var connectorProgress: [String: ConnectorProgress] = [:]
+
+    /// Update or create a connector's progress state.
+    func updateConnectorProgress(_ kind: SourceKind, update: (inout ConnectorProgress) -> Void) {
+        let id = kind.rawValue
+        if connectorProgress[id] == nil {
+            connectorProgress[id] = ConnectorProgress(kind: kind)
+        }
+        update(&connectorProgress[id!]!)
+    }
+
+    /// Get a snapshot of all connector progress states.
+    func connectorProgressSnapshot() -> [ConnectorProgress] {
+        Array(connectorProgress.values).sorted { $0.id < $1.id }
+    }
+
+    /// Mark a connector as started.
+    func markConnectorStarted(_ kind: SourceKind) {
+        updateConnectorProgress(kind) { $0.state = .running; $0.startedAt = Date() }
+    }
+
+    /// Mark a connector as completed with item count.
+    func markConnectorCompleted(_ kind: SourceKind, itemsProcessed: Int) {
+        updateConnectorProgress(kind) { $0.state = .completed; $0.itemsProcessed = itemsProcessed; $0.completedAt = Date() }
+    }
+
+    /// Mark a connector as failed with an error.
+    func markConnectorFailed(_ kind: SourceKind, error: String) {
+        updateConnectorProgress(kind) { $0.state = .failed; $0.error = error; $0.failedAt = Date() }
+    }
+
+    /// Advance a connector's item count.
+    func advanceConnectorItem(_ kind: SourceKind) {
+        updateConnectorProgress(kind) { $0.itemsProcessed += 1 }
+    }
+
+    /// Reset all connector progress (called between cycles).
+    func resetConnectorProgress() {
+        connectorProgress = [:]
+    }
 
     // MARK: Pointers (durable)
 
@@ -744,6 +828,18 @@ actor CycleStore {
     func counts() -> (notes: Int, buckets: Int) {
         let n = (try? modelContext.fetch(FetchDescriptor<CycleNote>())) ?? []
         return (n.count, Set(n.map(\.bucketKey)).count)
+    }
+
+    // MARK: - Progress Summary (Phase 1.3)
+
+    /// High-level summary of the current cycle's progress across all connectors.
+    /// Returns total notes, buckets, connectors currently running, and connectors failed.
+    func summary() -> (totalNotes: Int, totalBuckets: Int, connectorsRunning: Int, connectorsFailed: Int) {
+        let n = (try? modelContext.fetch(FetchDescriptor<CycleNote>())) ?? []
+        let buckets = Set(n.map(\.bucketKey)).count
+        let running = connectorProgress.values.filter { $0.state == .running }.count
+        let failed = connectorProgress.values.filter { $0.state == .failed }.count
+        return (n.count, buckets, running, failed)
     }
 
     private func item(from n: CycleNote) -> CycleNoteItem {
