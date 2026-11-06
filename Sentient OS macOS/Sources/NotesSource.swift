@@ -25,6 +25,14 @@ import Compression
 struct NotesSource: Sendable {
     let kind: SourceKind = .notes
 
+    // Phase 1.4: Per-connector timeout policy for Notes
+    /// Maximum wall-clock seconds for the entire connector's work.
+    static let timeoutSeconds: Double = 60
+    /// Maximum seconds for listing notes.
+    static let listTimeoutSeconds: Double = 10
+    /// Maximum seconds for a single load.
+    static let loadTimeoutSeconds: Double = 30
+
     // MARK: Tunables
     static let maxNotes = 1_000            // newest-first cap (TODO-plan connector limits)
     static let maxContentChars = 8_000     // same cap as file extraction

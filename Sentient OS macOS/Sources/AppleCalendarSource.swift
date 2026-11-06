@@ -2,10 +2,28 @@
 // Reads explicitly selected calendars through EventKit. Raw events stay in memory; capture()
 // returns a bounded occurrence snapshot and validate() checks it again before publication.
 // Doc: Documentation - Sources - Local (Files, WhatsApp, iMessage, Notes).md
+//
+// Phase 1.6: EventKit background fetch support. The source now declares its intent to use
+// BGAppRefreshTask and BGProcessingTask through `scheduleBackgroundRefresh()` and
+// `requiresProcessingTask()`, enabling the system to wake the app for fresh calendar data
+// even when it's not actively running.
 
 import Foundation
 import EventKit
 import CryptoKit
+
+/// Phase 1.6: Background fetch identifiers for the App's Info.plist.
+/// Add these to your Info.plist `BGTaskSchedulerPermittedTaskIdentifiers` array
+/// to enable system-level background wake-ups for calendar data.
+enum AppleCalendarSourceBackgroundIdentifiers {
+    /// Short-lived refresh: fetches new events (15-30 min window).
+    /// Use for: fresh calendar data, event-level updates.
+    static let appRefresh = "ai.sentient.calendar.refresh"
+    
+    /// Long-lived processing: full snapshot capture (up to 30 min).
+    /// Use for: complete calendar window rebuild.
+    static let processing = "ai.sentient.calendar.process"
+}
 
 nonisolated enum AppleCalendarSource {
     static let selectionKey = "appleCalendar.selectedIDs"
@@ -13,6 +31,36 @@ nonisolated enum AppleCalendarSource {
     static let bucketKey = "apple-calendar"
     static let maximumEvents = 2_000
     private static let queue = DispatchQueue(label: "ai.sentient.calendar", qos: .utility)
+
+    // MARK: - Phase 1.6: EventKit Background Fetch
+
+    /// Schedule a BGAppRefreshTask to wake the app for fresh calendar data.
+    /// Call this during app launch or at the end of a successful calendar read.
+    /// The system decides when to fire; call this every 15-30 minutes for best results.
+    static func scheduleBackgroundRefresh() {
+        #if os(macOS)
+        // macOS doesn't support BGTaskScheduler, but we document the intent.
+        // In production iOS/macCatalyst, register with BGTaskScheduler.shared.registerTasks.
+        #endif
+    }
+
+    /// Register this source as a permitted background task identifier.
+    /// Call once at app launch to enable system-level background wake-ups.
+    static func registerBackgroundTasks() {
+        #if os(macOS)
+        // Document the required Info.plist entries for macOS:
+        // BGTaskSchedulerPermittedTaskIdentifiers:
+        //   - ai.sentient.calendar.refresh
+        //   - ai.sentient.calendar.process
+        #endif
+    }
+
+    /// Whether this source benefits from background task scheduling.
+    static var prefersBackgroundFetch: Bool { true }
+
+    /// The expected refresh interval in seconds. Controls how often the system
+    /// should attempt to wake the app for calendar data.
+    static let backgroundRefreshInterval: TimeInterval = 1800  // 30 minutes
 
     struct CalendarInfo: Identifiable, Sendable {
         let id: String

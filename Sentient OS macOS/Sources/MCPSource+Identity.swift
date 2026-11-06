@@ -4,6 +4,8 @@
 // in the developer lab; ordinary ingestion does not require a profile tool.
 // Doc: Sources/Documentation - Sources - Cloud (Gmail, Calendar).md
 //
+// Phase 1.8: Deprecated — Use unified `MCPCall.execute()` from MCPSource.swift.
+//
 
 import Foundation
 import CryptoKit

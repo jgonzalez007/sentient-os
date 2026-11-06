@@ -23,6 +23,14 @@ struct SiYuanSource: Sendable {
     let kind: SourceKind = .siyuan
     private let workspaceURLs: [URL]?
 
+    // Phase 1.4: Per-connector timeout policy for SiYuan
+    /// Maximum wall-clock seconds for the entire connector's work.
+    static let timeoutSeconds: Double = 120
+    /// Maximum seconds for listing notes.
+    static let listTimeoutSeconds: Double = 30
+    /// Maximum seconds for a single load.
+    static let loadTimeoutSeconds: Double = 60
+
     /// Explicit workspaces also let offline fixtures exercise the real reader without user data.
     init(workspaces: [URL]? = nil) { workspaceURLs = workspaces }
 

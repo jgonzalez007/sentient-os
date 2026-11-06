@@ -4,6 +4,8 @@
 // Knowledge summaries do not require a separate proof of successful tool calls.
 // Doc: Documentation - Sources - Cloud (Gmail, Calendar).md
 //
+// Phase 1.8: Deprecated — Use unified `MCPCall.execute()` from MCPSource.swift.
+//
 
 import Foundation
 

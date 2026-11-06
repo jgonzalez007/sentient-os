@@ -451,6 +451,14 @@ enum FileRoot: Hashable, Identifiable {
     /// Desktop/Documents files can be keepers).
     var maxAge: TimeInterval? { self == .downloads ? 365 * 24 * 3_600 : nil }
 
+    // Phase 1.4: Per-connector timeout policy for Files
+    /// Maximum wall-clock seconds for the entire connector's work.
+    static let timeoutSeconds: Double = 120
+    /// Maximum seconds for listing files.
+    static let listTimeoutSeconds: Double = 30
+    /// Maximum seconds for a single load.
+    static let loadTimeoutSeconds: Double = 60
+
     /// The fully configured source for this root (nil if the system folder can't be resolved).
     /// The pointer key uses `id` (never `label` — two custom folders can share a name).
     var source: FilesSource? {

@@ -22,6 +22,14 @@ import AppKit   // NSWorkspace — install probe (LaunchServices isn't UI-actor-
 struct WhatsAppSource: Sendable {
     let kind: SourceKind = .whatsapp
 
+    // Phase 1.4: Per-connector timeout policy for WhatsApp
+    /// Maximum wall-clock seconds for the entire connector's work.
+    static let timeoutSeconds: Double = 90
+    /// Maximum seconds for listing chats.
+    static let listTimeoutSeconds: Double = 20
+    /// Maximum seconds for a single load.
+    static let loadTimeoutSeconds: Double = 45
+
     /// Opt-in filter: only these chat JIDs are analyzed. nil = every chat (used by the self-test dump).
     let chatJIDs: Set<String>?
 

@@ -3,6 +3,8 @@
 // Runs tool-free selection and summarization for native connector readers, with shared metering.
 // Doc: Documentation - Sources - Cloud (Gmail, Calendar).md
 //
+//
+// Phase 1.8: Deprecated — Use unified `MCPCall.execute()` from MCPSource.swift.
 
 import Foundation
 import os

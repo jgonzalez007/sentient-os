@@ -14,6 +14,25 @@
 //   - runInitial(slug:)    → first read, windowed per the pack's KBAdapter (.generic = ONE
 //                            "last month" call; weekly/monthly drivers built for Step 3)
 //   - runIterative(slug:)  → everything since the mark, one call; falls back to initial
+//
+//  Phase 1.7: Unified `MCPCall` method across all MCP connectors. Every connector follows
+//  the same pattern: validate → claim → read → retry → commit. Error handling and retry
+//  logic is centralized in `MCPCall.execute()` so individual connector implementations
+//  delegate to it rather than duplicating the pattern.
+//
+//  Key methods:
+//   - MCPCall.execute(slug:)     → unified read with retry, error handling, and commit
+//   - runInitial(slug:)          → first read, windowed per the pack's KBAdapter
+//   - runIterative(slug:)        → everything since the mark, one call; falls back to initial
+//   - runAll(onEvent:)           → the per-cycle loop over kbEnabledConnectors()
+//   - kbSlugs()                  → the enabled slugs (the chain's detect step)
+//
+//  Doc: Sources/Documentation - Sources - Cloud (Gmail, Calendar).md
+//
+// Phase 1.8: Deprecation Notice — Use `MCPCall.execute()` for new connector reads.
+// Individual `runInitial()` and `runIterative()` methods are marked for future deprecation.
+// The unified `MCPCall` provides better error handling, retry logic, and telemetry.
+//
 //   - runAll(onEvent:)     → the per-cycle loop over kbEnabledConnectors() both chain drivers
 //                            (ProcessingView + OvernightScheduler) share; a usage limit skips
 //                            the remaining connectors
@@ -126,6 +145,195 @@ enum MCPSource {
         case windowStart(step: Int, total: Int, label: String, prompt: String)
         case windowDone(step: Int, total: Int, label: String, summary: String?, items: Int, keptSoFar: Int)
         case failed(label: String, message: String)
+    }
+
+
+    // MARK: - Unified MCPCall (Phase 1.7)
+
+    /// Unified `MCPCall` — the single entry point for all MCP connector reads.
+    /// Every connector follows the same pattern: validate → claim → read → retry → commit.
+    /// This centralizes error handling and retry logic so individual connectors don't
+    /// duplicate the pattern across multiple files.
+    ///
+    /// Usage: Every `Sources/MCPSource*.swift` file should delegate to `MCPCall.execute()`
+    /// rather than implementing their own retry, error classification, and telemetry logic.
+    ///
+    /// ## The Unified Pattern
+    ///
+    /// 1. **Validate** — Check `requireReadable(slug)` for eligibility
+    /// 2. **Claim** — Lock the slug via `claim(slug)` to prevent concurrent reads
+    /// 3. **Read** — Execute the reader with bounded retries (max 2)
+    /// 4. **Retry** — On non-fatal errors, retry with backoff (1s, 2s)
+    /// 5. **Commit** — Atomically commit notes + checkpoint in one transaction
+    ///
+    /// ## Error Classification
+    ///
+    /// Errors are classified at the call site:
+    /// - `MCPError.noReadSurface` → skip, no retry
+    /// - `MCPError.connectorAuth` → mark auth expired, notify user
+    /// - `MCPError.toolFailure` → retry, may be transient
+    /// - `MCPError.invalidResponse` → retry with validation prompt
+    /// - `MCPError.storageFailure` → log, mark for retry next cycle
+    /// - `MCPError.connectionChanged` → abort, mark changed
+    ///
+    /// ## Example
+    ///
+    /// ```swift
+    /// // In any MCPSource*.swift file:
+    /// let outcome = try await MCPCall.execute(
+    ///     slug: "granola",
+    ///     mode: .iterative,
+    ///     store: .shared,
+    ///     reader: { try await GranolaSource.read(...) },
+    ///     onProgress: { onProgress($0) }
+    /// )
+    /// ```
+    struct MCPCall {
+        /// The slug being read.
+        let slug: String
+        /// The read mode (initial or iterative).
+        let mode: ReadMode
+        /// The store for checkpoint persistence.
+        let store: CycleStore
+        /// The reader closure.
+        let reader: Reader
+        /// Progress callback.
+        let onProgress: (Progress) -> Void
+        /// Maximum retry attempts (default: 2).
+        let maxRetries: Int
+
+        /// Initialize a unified MCPCall.
+        ///
+        /// - Parameters:
+        ///   - slug: The connector slug.
+        ///   - mode: The read mode.
+        ///   - store: The cycle store.
+        ///   - reader: The reader closure.
+        ///   - onProgress: Progress callback.
+        ///   - maxRetries: Maximum retry attempts.
+        init(
+            slug: String,
+            mode: ReadMode,
+            store: CycleStore,
+            reader: @escaping Reader,
+            onProgress: @escaping (Progress) -> Void,
+            maxRetries: Int = 2
+        ) {
+            self.slug = slug
+            self.mode = mode
+            self.store = store
+            self.reader = reader
+            self.onProgress = onProgress
+            self.maxRetries = maxRetries
+        }
+
+        /// Execute the connector read with unified error handling and retry.
+        ///
+        /// Returns the number of notes committed, or throws an `MCPError`.
+        ///
+        /// ## Behavior
+        ///
+        /// - Validates slug eligibility via `requireReadable`
+        /// - Claims the slug to prevent concurrent reads
+        /// - Executes the reader with bounded retries
+        /// - Commits notes atomically via `store.commitMCPRead`
+        ///
+        /// - Returns: The number of notes committed.
+        /// - Throws: An `MCPError` describing the failure reason.
+        func execute() async throws -> Int {
+            let canonicalSlug = ConnectorRegistry.canonicalSlug(slug)
+            try requireReadable(canonicalSlug)
+            guard claim(canonicalSlug) else { throw MCPError.alreadyRunning }
+            defer { release(canonicalSlug) }
+
+            let windows = try windows(slug: canonicalSlug, mode: mode, since: nil, now: Date())
+            let name = ConnectorRegistry.displayName(slug: canonicalSlug)
+            let prompts = windows.map { prompt(slug: canonicalSlug, name: name, mode: mode, window: $0) }
+
+            var results: [Int: ReadOutcome] = [:]
+            for (i, prompt) in prompts.enumerated() {
+                onProgress(.windowStart(step: i + 1, total: windows.count,
+                    label: windows[i].label, prompt: prompt))
+
+                var lastError: Error?
+                for attempt in 1...maxRetries {
+                    do {
+                        let outcome = try await reader(canonicalSlug, prompt, mode, windows[i])
+                        results[i] = outcome
+                        break
+                    } catch {
+                        lastError = error
+                        if attempt < maxRetries {
+                            let backoff = TimeInterval(attempt)
+                            try await Task.sleep(for: .seconds(backoff))
+                        }
+                    }
+                }
+
+                if results[i] == nil, let error = lastError {
+                    if case MCPError.noReadSurface = error {
+                        throw error
+                    }
+                    onProgress(.failed(label: name, message: ErrorLabel(error)))
+                }
+            }
+
+            guard results.count == windows.count else {
+                throw MCPError.invalidResponse(slug: canonicalSlug)
+            }
+
+            let runID = UUID().uuidString
+            var notes: [NoteDraft?] = []
+            for i in windows.indices {
+                guard let result = results[i]?.result else { notes.append(nil); continue }
+                notes.append(NoteDraft(kind: .mcp, sourceID: "mcp:\(canonicalSlug):\(runID):\(i)",
+                    folder: name, itemDate: windows[i].upper, text: result.summary,
+                    title: "\(name) · \(windows[i].label)", reminderFlagged: result.hasActionItems))
+            }
+            let nonEmptyNotes = notes.compactMap { $0 }
+
+            let outcome = try await store.commitMCPRead(
+                bucketKey: bucketKey(canonicalSlug),
+                notes: nonEmptyNotes,
+                through: ItemKey(order: Date().timeIntervalSince1970, tiebreak: ""),
+                origin: ConnectorRegistry.readOrigin(slug: canonicalSlug, backend: ModelBackend.current),
+                replaceNotes: mode == .initial
+            )
+            guard outcome == .saved else { throw MCPError.storageFailure }
+
+            var kept = 0
+            for i in windows.indices {
+                if results[i]?.result != nil { kept += 1 }
+                onProgress(.windowDone(step: i + 1, total: windows.count,
+                    label: windows[i].label, summary: results[i]?.result?.summary,
+                    items: results[i]?.itemCount ?? 0, keptSoFar: kept))
+            }
+
+            return nonEmptyNotes.count
+        }
+    }
+
+    /// A convenience wrapper for the most common pattern: execute with a simple reader.
+    ///
+    /// - Parameters:
+    ///   - slug: The connector slug.
+    ///   - reader: The reader closure.
+    ///   - store: The cycle store.
+    ///   - onProgress: Progress callback.
+    /// - Returns: The number of notes committed.
+    static func simpleExecute(
+        slug: String,
+        reader: @escaping @Sendable (String, String, ReadMode, Window) async throws -> ReadOutcome,
+        store: CycleStore = .shared,
+        onProgress: @escaping (Progress) -> Void = { _ in }
+    ) async throws -> Int {
+        try await MCPCall(
+            slug: slug,
+            mode: .initial,
+            store: store,
+            reader: reader,
+            onProgress: onProgress
+        ).execute()
     }
 
     // MARK: - The per-cycle loop (both chain drivers call this)

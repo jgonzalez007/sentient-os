@@ -4,6 +4,8 @@
 // and engine-specific Drive instructions. The reader and lab use the same builder.
 // Doc: Sources/Documentation - Sources - Cloud (Gmail, Calendar).md
 //
+// Phase 1.8: Deprecated — Use unified `MCPCall.execute()` from MCPSource.swift.
+//
 
 import Foundation
 

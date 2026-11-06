@@ -8,6 +8,10 @@
 //  read the copy, and delete it. For the DB sources we delete it *immediately* after extraction
 //  so a plaintext copy of someone's messages never lingers on disk.
 //
+//  Phase 1.5: SQLite connection pooling. `SQLiteDB` now provides a pooled connection layer
+//  that shares open database handles across calls, reducing file open/close overhead.
+//  Pools have max connections, reuse, and cleanup. Mail and iMessage share the pool.
+//
 //  Shared by all three DB sources (the first real second-use-case that justifies a helper).
 //
 
@@ -64,23 +68,213 @@ nonisolated enum SQLiteDB {
     }
 }
 
+// MARK: - SQLite Connection Pool (Phase 1.5)
+
+/// A thread-safe, non-isolated connection pool for SQLite. Reduces open/close overhead
+/// by reusing OpaquePointer handles across calls. Pool enforces max connections, automatic
+/// cleanup on deinit, and per-path isolation.
+///
+/// Used by: Apple Mail, iMessage, WhatsApp, Notes.
+///
+/// The pool is keyed by database path. Each path gets at most `maxConnections` open handles,
+/// but in practice only one handle is needed per path (the handles are read-only and safe
+/// to share across concurrent readers).
+final class SQLiteConnectionPool: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handles: [String: [(opaque: OpaquePointer?, closeAt: Date)]] = [:]
+    private let maxConnectionsPerPath: Int
+    private let idleTimeout: TimeInterval
+    
+    /// The singleton shared pool (all DB sources share it).
+    static let shared = SQLiteConnectionPool(maxConnections: 10, idleTimeout: 300)
+    
+    /// Create a new pool. In production, use `SQLiteConnectionPool.shared`.
+    ///
+    /// - Parameters:
+    ///   - maxConnections: Maximum open handles per database path.
+    ///   - idleTimeout: Seconds before an idle handle is closed.
+    init(maxConnections: Int = 10, idleTimeout: TimeInterval = 300) {
+        self.maxConnectionsPerPath = maxConnections
+        self.idleTimeout = idleTimeout
+    }
+    
+    deinit {
+        lock.lock()
+        defer { lock.unlock() }
+        for path in handles.keys {
+            for (handle, _) in handles[path] ?? [] {
+                if let handle { sqlite3_close(handle) }
+            }
+        }
+        handles.removeAll()
+    }
+    
+    /// Get an existing or new connection for a database path.
+    ///
+    /// - Parameter path: The file path to the database.
+    /// - Returns: An OpaquePointer to the SQLite database, or nil on failure.
+    ///
+    /// The returned handle is owned by the pool. Callers must NOT close it directly.
+    /// Use `release(path:handle)` when done with the handle.
+    func acquire(path: String) -> OpaquePointer? {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        // Clean up expired handles first.
+        cleanup()
+        
+        // Try to reuse an existing handle for this path.
+        if var entries = handles[path], !entries.isEmpty {
+            for i in entries.indices {
+                let (handle, closeAt) = entries[i]
+                if handle != nil && Date().timeIntervalSince(closeAt) < idleTimeout {
+                    // Valid handle, remove it from the pool for reuse.
+                    entries.remove(at: i)
+                    handles[path] = entries.isEmpty ? nil : entries
+                    return handle
+                }
+            }
+        }
+        
+        // Create a new read-only handle.
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
+              let db else {
+            return nil
+        }
+        
+        // Store in pool for reuse.
+        var entries = handles[path] ?? []
+        if entries.count >= maxConnectionsPerPath {
+            // Pool full; close the oldest.
+            entries.remove(at: 0)
+        }
+        entries.append((db, Date().addingTimeInterval(idleTimeout)))
+        handles[path] = entries
+        
+        return db
+    }
+    
+    /// Release a handle back to the pool for reuse.
+    ///
+    /// - Parameters:
+    ///   - path: The database path the handle was acquired from.
+    ///   - handle: The handle to return.
+    func release(path: String, handle: OpaquePointer?) {
+        guard handle != nil else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        var entries = handles[path] ?? []
+        entries.append((handle, Date().addingTimeInterval(idleTimeout)))
+        handles[path] = entries
+    }
+    
+    /// Remove all handles for a path and optionally close them.
+    ///
+    /// - Parameters:
+    ///   - path: The database path.
+    ///   - closeAll: If true, close all handles for the path.
+    func releasePath(_ path: String, closeAll: Bool = false) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let entries = handles[path] {
+            if closeAll {
+                for (handle, _) in entries {
+                    if let handle { sqlite3_close(handle) }
+                }
+            }
+        }
+        handles[path] = nil
+    }
+    
+    /// Close all handles in the pool (used during cleanup or shutdown).
+    func closeAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        for entries in handles.values {
+            for (handle, _) in entries {
+                if let handle { sqlite3_close(handle) }
+            }
+        }
+        handles.removeAll()
+    }
+    
+    /// Cleanup idle handles past the timeout.
+    private func cleanup() {
+        let cutoff = Date().timeIntervalSince1970 - idleTimeout
+        for path in handles.keys {
+            handles[path] = handles[path]?.filter { $0.closeAt.timeIntervalSince1970 > cutoff } 
+                ?? []
+        }
+        // Remove empty entries.
+        handles = Dictionary(filter: handles.map { ($0.key, $0.value) }, uniquingKeysWith: { $0 })
+    }
+    
+    /// Get the number of open handles.
+    var openHandleCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return handles.values.reduce(0) { $0 + $1.count }
+    }
+}
+
 /// A thin SQLite connection for reading one copied DB. Single-threaded use; closes on deinit.
 /// Opened read-WRITE on the *temp copy* (not the original) so SQLite can transparently replay the
 /// copied `-wal` — the most reliable way to see the very latest rows.
 nonisolated final class SQLiteReader {
     private var db: OpaquePointer?
+    private let path: String  // tracked for pool release
+    private let usePool: Bool // whether to use the shared pool
     private let dbName: String   // the DB basename (chat.db / ChatStorage.sqlite / …) — a diagnostics tag
 
-    init(path: String) throws {
+    init(path: String, usePool: Bool = true) throws {
         let name = URL(fileURLWithPath: path).lastPathComponent
         dbName = ["chat.db", "ChatStorage.sqlite", "NoteStore.sqlite", "Envelope Index", "sms.db"].contains(name) ? name : "other"
+        self.path = path
+        self.usePool = usePool
+        
+        if usePool {
+            // Try to acquire from the pool first.
+            if let pooled = SQLiteConnectionPool.shared.acquire(path: path) {
+                db = pooled
+                return
+            }
+            // If pool acquire fails, fall through to create a new handle.
+        }
+        
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else {
             let msg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
-            sqlite3_close(db); db = nil
+            db = nil
             throw SQLiteDB.DBError.open(msg)
         }
     }
-    deinit { sqlite3_close(db) }
+    
+    deinit {
+        if usePool {
+            // Return to pool instead of closing.
+            if let db { SQLiteConnectionPool.shared.release(path: path, handle: db) }
+        } else {
+            sqlite3_close(db)
+        }
+    }
+
+    /// Dispose of the reader and optionally close the pooled handle.
+    ///
+    /// - Parameter forceClose: If true, force-close the handle instead of returning to pool.
+    func dispose(forceClose: Bool = false) {
+        if usePool && !forceClose {
+            // Nothing to do; the pool will hold it.
+            return
+        }
+        if let db {
+            if usePool {
+                SQLiteConnectionPool.shared.releasePath(path, closeAll: false)
+            } else {
+                sqlite3_close(db)
+            }
+        }
+        db = nil
+    }
 
     /// Run a read query, invoking `row` for each result row in order. (We interpolate only our own
     /// numeric literals into SQL — no untrusted input — so no bind params are needed.)

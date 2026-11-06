@@ -26,6 +26,14 @@ import Foundation
 struct iMessageSource: Sendable {
     let kind: SourceKind = .imessage
 
+    // Phase 1.4: Per-connector timeout policy for iMessage
+    /// Maximum wall-clock seconds for the entire connector's work.
+    static let timeoutSeconds: Double = 90
+    /// Maximum seconds for listing chats.
+    static let listTimeoutSeconds: Double = 20
+    /// Maximum seconds for a single load.
+    static let loadTimeoutSeconds: Double = 45
+
     /// Opt-in filter: only these chat GUIDs are analyzed. nil = every chat (used by the self-test dump).
     let chatGUIDs: Set<String>?
 
